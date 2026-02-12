@@ -1,10 +1,15 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Plus, UtensilsCrossed, Coffee, Sun, Moon, Cookie, ChevronLeft, ChevronRight, Trash2, Edit2, Flame, Sparkles, Loader2 } from 'lucide-react';
+import {
+  Plus, UtensilsCrossed, Coffee, Sun, Moon, Cookie,
+  ChevronLeft, ChevronRight, Trash2, Edit2, Flame,
+  Sparkles, Loader2, Mic, MicOff, Camera, Image as ImageIcon
+} from 'lucide-react';
 import { format, addDays, isSameDay } from 'date-fns';
 import { es } from 'date-fns/locale';
 import { Meal, MealType, FoodItem } from '@/types';
 import { getMeals, saveMeal, deleteMeal, generateId, getProfile, calculateDailyTargets } from '@/lib/storage';
+import { analyzeTextWithGemini, analyzeImageWithGemini, fileToBase64 } from '@/lib/gemini';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -206,8 +211,17 @@ function MealFormDialog({
   const [mealType, setMealType] = useState<MealType>('lunch');
   const [time, setTime] = useState('12:00');
   const [foods, setFoods] = useState<FoodItem[]>([{ name: '', calories: 0, protein: 0, carbs: 0, fat: 0 }]);
+
+  // AI states
   const [aiDescription, setAiDescription] = useState('');
   const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [isListening, setIsListening] = useState(false);
+  const [imagePreview, setImagePreview] = useState<string | null>(null);
+  const [inputMode, setInputMode] = useState<'text' | 'voice' | 'image'>('text');
+
+  // Refs
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const recognitionRef = useRef<any>(null);
 
   useEffect(() => {
     if (editing) {
@@ -220,7 +234,18 @@ function MealFormDialog({
       setFoods([{ name: '', calories: 0, protein: 0, carbs: 0, fat: 0 }]);
     }
     setAiDescription('');
+    setImagePreview(null);
+    setIsListening(false);
   }, [editing, open]);
+
+  // Cleanup speech recognition on unmount
+  useEffect(() => {
+    return () => {
+      if (recognitionRef.current) {
+        recognitionRef.current.stop();
+      }
+    };
+  }, []);
 
   const updateFood = (index: number, field: keyof FoodItem, value: any) => {
     setFoods(prev => prev.map((f, i) => i === index ? { ...f, [field]: value } : f));
@@ -229,45 +254,118 @@ function MealFormDialog({
   const addFood = () => setFoods(prev => [...prev, { name: '', calories: 0, protein: 0, carbs: 0, fat: 0 }]);
   const removeFood = (index: number) => setFoods(prev => prev.filter((_, i) => i !== index));
 
-  const analyzeWithAI = async () => {
-    if (!aiDescription.trim()) {
-      toast.error('Escribe qué has comido');
+  // ─── Voice Input (Web Speech API) ───
+  const toggleVoice = () => {
+    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    if (!SpeechRecognition) {
+      toast.error('Tu navegador no soporta reconocimiento de voz. Usa Chrome o Edge.');
       return;
     }
+
+    if (isListening) {
+      recognitionRef.current?.stop();
+      setIsListening(false);
+      return;
+    }
+
+    const recognition = new SpeechRecognition();
+    recognition.lang = 'es-ES';
+    recognition.continuous = true;
+    recognition.interimResults = true;
+
+    let finalTranscript = aiDescription;
+
+    recognition.onresult = (event: any) => {
+      let interim = '';
+      for (let i = event.resultIndex; i < event.results.length; i++) {
+        const t = event.results[i][0].transcript;
+        if (event.results[i].isFinal) {
+          finalTranscript += (finalTranscript ? ' ' : '') + t;
+        } else {
+          interim += t;
+        }
+      }
+      setAiDescription(finalTranscript + (interim ? ' ' + interim : ''));
+    };
+
+    recognition.onerror = (event: any) => {
+      console.error('Speech error:', event.error);
+      setIsListening(false);
+      if (event.error === 'not-allowed') {
+        toast.error('Permiso de micrófono denegado. Actívalo en la configuración del navegador.');
+      }
+    };
+
+    recognition.onend = () => {
+      setIsListening(false);
+    };
+
+    recognitionRef.current = recognition;
+    recognition.start();
+    setIsListening(true);
+    setInputMode('voice');
+    toast.success('🎤 Escuchando... Describe lo que has comido');
+  };
+
+  // ─── Image Input ───
+  const handleImageSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    // Validate file type and size
+    if (!file.type.startsWith('image/')) {
+      toast.error('Por favor, selecciona una imagen');
+      return;
+    }
+    if (file.size > 10 * 1024 * 1024) {
+      toast.error('La imagen es demasiado grande (máx. 10MB)');
+      return;
+    }
+
+    // Preview
+    const reader = new FileReader();
+    reader.onload = () => setImagePreview(reader.result as string);
+    reader.readAsDataURL(file);
+
+    // Analyze with Gemini Vision
+    setIsAnalyzing(true);
+    setInputMode('image');
+    try {
+      const base64 = await fileToBase64(file);
+      const result = await analyzeImageWithGemini(base64, file.type);
+
+      setFoods(result.foods);
+      if (result.mealType) setMealType(result.mealType);
+      toast.success('📸 ¡Imagen analizada! Revisa los datos antes de guardar.');
+    } catch (err: any) {
+      toast.error(err.message || 'Error al analizar la imagen');
+    } finally {
+      setIsAnalyzing(false);
+    }
+  };
+
+  // ─── Text Analysis with Gemini ───
+  const analyzeWithAI = async () => {
+    if (!aiDescription.trim()) {
+      toast.error('Escribe o dicta qué has comido');
+      return;
+    }
+
+    // Stop voice if active
+    if (isListening) {
+      recognitionRef.current?.stop();
+      setIsListening(false);
+    }
+
     setIsAnalyzing(true);
     try {
-      const resp = await fetch(
-        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/analyze-food`,
-        {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
-          },
-          body: JSON.stringify({ description: aiDescription }),
-        }
-      );
+      const result = await analyzeTextWithGemini(aiDescription);
 
-      if (!resp.ok) {
-        const err = await resp.json().catch(() => ({}));
-        throw new Error(err.error || 'Error al analizar');
-      }
-
-      const data = await resp.json();
-      if (data.foods && Array.isArray(data.foods) && data.foods.length > 0) {
-        setFoods(data.foods.map((f: any) => ({
-          name: f.name || '',
-          calories: Math.round(f.calories || 0),
-          protein: Math.round(f.protein || 0),
-          carbs: Math.round(f.carbs || 0),
-          fat: Math.round(f.fat || 0),
-        })));
-        toast.success('¡Alimentos analizados! Puedes editar los valores.');
-      } else {
-        throw new Error('No se pudieron detectar alimentos');
-      }
-    } catch (e: any) {
-      toast.error(e.message || 'Error al analizar la comida');
+      setFoods(result.foods);
+      if (result.mealType) setMealType(result.mealType);
+      toast.success('✨ ¡Analizado! Revisa y edita los valores antes de guardar.');
+    } catch (err: any) {
+      toast.error(err.message || 'Error al analizar la comida');
     } finally {
       setIsAnalyzing(false);
     }
@@ -303,7 +401,7 @@ function MealFormDialog({
 
   return (
     <Dialog open={open} onOpenChange={v => !v && onClose()}>
-      <DialogContent className="bg-card border-border max-w-sm mx-auto max-h-[80vh] overflow-y-auto">
+      <DialogContent className="bg-card border-border max-w-sm mx-auto max-h-[85vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>{editing ? 'Editar' : 'Registrar'} Comida</DialogTitle>
         </DialogHeader>
@@ -327,34 +425,122 @@ function MealFormDialog({
             </div>
           </div>
 
-          {/* AI Analysis Section */}
-          <div className="space-y-2 p-3 rounded-xl bg-muted/50 border border-border">
+          {/* ═══════ AI Input Section ═══════ */}
+          <div className="space-y-2.5 p-3 rounded-xl bg-gradient-to-br from-secondary/5 to-accent/5 border border-border">
             <div className="flex items-center gap-2">
               <Sparkles className="w-4 h-4 text-secondary" />
-              <Label className="text-xs font-semibold">Describe lo que has comido</Label>
+              <Label className="text-xs font-semibold">Asistente IA</Label>
             </div>
-            <Textarea
-              value={aiDescription}
-              onChange={e => setAiDescription(e.target.value)}
-              placeholder="Ej: Dos huevos revueltos con tostadas, un café con leche y una naranja"
-              className="bg-card border-border text-sm min-h-[60px] resize-none"
+
+            {/* Input mode buttons */}
+            <div className="flex gap-1.5">
+              <button
+                onClick={() => setInputMode('text')}
+                className={`flex-1 py-1.5 px-2 rounded-lg text-[11px] font-medium transition-all flex items-center justify-center gap-1 ${inputMode === 'text' ? 'bg-secondary text-secondary-foreground' : 'bg-muted hover:bg-muted/80'
+                  }`}
+              >
+                <Sparkles className="w-3 h-3" /> Texto
+              </button>
+              <button
+                onClick={() => { setInputMode('voice'); toggleVoice(); }}
+                className={`flex-1 py-1.5 px-2 rounded-lg text-[11px] font-medium transition-all flex items-center justify-center gap-1 ${inputMode === 'voice' || isListening ? 'bg-secondary text-secondary-foreground' : 'bg-muted hover:bg-muted/80'
+                  }`}
+              >
+                {isListening ? <MicOff className="w-3 h-3" /> : <Mic className="w-3 h-3" />}
+                {isListening ? 'Parar' : 'Voz'}
+              </button>
+              <button
+                onClick={() => { setInputMode('image'); fileInputRef.current?.click(); }}
+                className={`flex-1 py-1.5 px-2 rounded-lg text-[11px] font-medium transition-all flex items-center justify-center gap-1 ${inputMode === 'image' ? 'bg-secondary text-secondary-foreground' : 'bg-muted hover:bg-muted/80'
+                  }`}
+              >
+                <Camera className="w-3 h-3" /> Foto
+              </button>
+            </div>
+
+            {/* Hidden file input for images */}
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="image/*"
+              capture="environment"
+              className="hidden"
+              onChange={handleImageSelect}
             />
-            <Button
-              onClick={analyzeWithAI}
-              disabled={isAnalyzing || !aiDescription.trim()}
-              variant="outline"
-              className="w-full text-sm border-secondary text-secondary hover:bg-secondary hover:text-secondary-foreground"
-            >
-              {isAnalyzing ? (
-                <><Loader2 className="w-4 h-4 mr-1.5 animate-spin" /> Analizando...</>
-              ) : (
-                <><Sparkles className="w-4 h-4 mr-1.5" /> Estimar con IA</>
-              )}
-            </Button>
+
+            {/* Image preview */}
+            {imagePreview && (
+              <div className="relative rounded-lg overflow-hidden">
+                <img src={imagePreview} alt="Food preview" className="w-full h-32 object-cover rounded-lg" />
+                <button
+                  onClick={() => { setImagePreview(null); if (fileInputRef.current) fileInputRef.current.value = ''; }}
+                  className="absolute top-1.5 right-1.5 bg-black/50 text-white rounded-full p-1"
+                >
+                  <Trash2 className="w-3 h-3" />
+                </button>
+              </div>
+            )}
+
+            {/* Text/Voice input */}
+            {(inputMode === 'text' || inputMode === 'voice') && (
+              <>
+                <Textarea
+                  value={aiDescription}
+                  onChange={e => setAiDescription(e.target.value)}
+                  placeholder={isListening
+                    ? '🎤 Escuchando... habla ahora'
+                    : 'Ej: "He desayunado tostadas con aguacate, dos huevos revueltos y un zumo de naranja"'
+                  }
+                  className={`bg-card border-border text-sm min-h-[60px] resize-none transition-all ${isListening ? 'border-secondary ring-2 ring-secondary/30' : ''
+                    }`}
+                />
+
+                {/* Voice indicator */}
+                {isListening && (
+                  <div className="flex items-center justify-center gap-2 py-1">
+                    <div className="flex gap-0.5">
+                      {[0, 1, 2, 3, 4].map(i => (
+                        <div
+                          key={i}
+                          className="w-1 bg-secondary rounded-full animate-pulse"
+                          style={{
+                            height: `${8 + Math.random() * 12}px`,
+                            animationDelay: `${i * 0.15}s`,
+                          }}
+                        />
+                      ))}
+                    </div>
+                    <span className="text-[10px] text-secondary font-medium">Grabando...</span>
+                  </div>
+                )}
+
+                <Button
+                  onClick={analyzeWithAI}
+                  disabled={isAnalyzing || !aiDescription.trim()}
+                  variant="outline"
+                  className="w-full text-sm border-secondary text-secondary hover:bg-secondary hover:text-secondary-foreground"
+                >
+                  {isAnalyzing ? (
+                    <><Loader2 className="w-4 h-4 mr-1.5 animate-spin" /> Analizando...</>
+                  ) : (
+                    <><Sparkles className="w-4 h-4 mr-1.5" /> Analizar con IA</>
+                  )}
+                </Button>
+              </>
+            )}
+
+            {/* Loading overlay for image analysis */}
+            {isAnalyzing && inputMode === 'image' && (
+              <div className="flex items-center justify-center gap-2 py-3">
+                <Loader2 className="w-5 h-5 animate-spin text-secondary" />
+                <span className="text-xs text-muted-foreground">Analizando imagen...</span>
+              </div>
+            )}
           </div>
 
+          {/* ═══════ Food Items (editable) ═══════ */}
           <div className="space-y-2">
-            <Label className="text-xs">Alimentos {foods.some(f => f.name) && <span className="text-muted-foreground">(puedes editar los valores)</span>}</Label>
+            <Label className="text-xs">Alimentos {foods.some(f => f.name) && <span className="text-muted-foreground">(revisa y edita los valores)</span>}</Label>
             {foods.map((food, i) => (
               <div key={i} className="bg-muted rounded-xl p-3 space-y-2">
                 <div className="flex items-center justify-between">

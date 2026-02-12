@@ -5,6 +5,7 @@ import { format, addDays, startOfWeek, isSameDay, parseISO } from 'date-fns';
 import { es } from 'date-fns/locale';
 import { Workout, ExerciseType, Intensity } from '@/types';
 import { getWorkouts, saveWorkout, deleteWorkout, getProfile, estimateCaloriesBurned, generateId } from '@/lib/storage';
+import { isWorkoutOnDate } from '@/lib/recurrence';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -65,7 +66,8 @@ export default function Training() {
   );
 
   const selectedDateStr = format(selectedDate, 'yyyy-MM-dd');
-  const dayWorkouts = workouts.filter(w => w.date === selectedDateStr);
+
+  const dayWorkouts = workouts.filter(w => isWorkoutOnDate(w, selectedDate));
 
   const handleSave = (workout: Workout) => {
     saveWorkout(workout);
@@ -111,16 +113,15 @@ export default function Training() {
           <div className="grid grid-cols-7 gap-1">
             {weekDays.map(day => {
               const dayStr = format(day, 'yyyy-MM-dd');
-              const hasWorkout = workouts.some(w => w.date === dayStr);
+              const hasWorkout = workouts.some(w => isWorkoutOnDate(w, day));
               const isSelected = isSameDay(day, selectedDate);
               const isToday = isSameDay(day, new Date());
               return (
                 <button
                   key={dayStr}
                   onClick={() => setSelectedDate(day)}
-                  className={`flex flex-col items-center py-2 rounded-xl transition-all ${
-                    isSelected ? 'gradient-training text-primary-foreground' : isToday ? 'bg-muted' : ''
-                  }`}
+                  className={`flex flex-col items-center py-2 rounded-xl transition-all ${isSelected ? 'gradient-training text-primary-foreground' : isToday ? 'bg-muted' : ''
+                    }`}
                 >
                   <span className="text-[10px] uppercase font-medium opacity-70">
                     {format(day, 'EEE', { locale: es }).slice(0, 2)}
@@ -227,14 +228,44 @@ function WorkoutFormDialog({
       setNotes(editing.notes || '');
       setManualCalories(editing.caloriesBurned);
     } else {
-      setExerciseType('gym');
       setDuration(60);
       setIntensity('medium');
       setTime('09:00');
       setNotes('');
       setManualCalories(null);
+      setRecurring(false);
+      setRecurrenceType('none');
+      setRecurrenceInterval(1);
+      setRecurrenceDays([]);
+      setRecurrenceEnd('');
     }
   }, [editing, open]);
+
+  // Recurrence states
+  const [recurring, setRecurring] = useState(false);
+  const [recurrenceType, setRecurrenceType] = useState<'none' | 'daily' | 'weekly' | 'custom'>('none');
+  const [recurrenceInterval, setRecurrenceInterval] = useState(1);
+  const [recurrenceDays, setRecurrenceDays] = useState<number[]>([]);
+  const [recurrenceEnd, setRecurrenceEnd] = useState('');
+
+  // Handle loading editing state for recurrence
+  useEffect(() => {
+    if (editing) {
+      setRecurring(editing.recurring || false);
+      setRecurrenceType(editing.recurrenceType || 'none');
+      setRecurrenceInterval(editing.recurrenceInterval || 1);
+      setRecurrenceDays(editing.recurrenceDays || []);
+      setRecurrenceEnd(editing.recurrenceEnd || '');
+    }
+  }, [editing]);
+
+  const toggleDay = (dayIndex: number) => {
+    setRecurrenceDays(prev =>
+      prev.includes(dayIndex)
+        ? prev.filter(d => d !== dayIndex)
+        : [...prev, dayIndex]
+    );
+  };
 
   const profile = getProfile();
   const weight = profile?.weight || 70;
@@ -251,6 +282,11 @@ function WorkoutFormDialog({
       intensity,
       caloriesBurned: calories,
       notes: notes || undefined,
+      recurring,
+      recurrenceType: recurring ? recurrenceType : undefined,
+      recurrenceInterval: recurring && recurrenceType === 'custom' ? recurrenceInterval : undefined,
+      recurrenceDays: recurring && recurrenceType === 'weekly' ? recurrenceDays : undefined,
+      recurrenceEnd: recurring && recurrenceEnd ? recurrenceEnd : undefined,
     });
   };
 
@@ -306,6 +342,83 @@ function WorkoutFormDialog({
             <Label className="text-xs">Notas</Label>
             <Input value={notes} onChange={e => setNotes(e.target.value)} placeholder="Opcional" className="bg-muted border-border" />
           </div>
+
+          <div className="space-y-3 pt-2 border-t border-border">
+            <div className="flex items-center justify-between">
+              <Label className="text-xs font-semibold">Repetir entrenamiento</Label>
+              <div className="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  checked={recurring}
+                  onChange={e => {
+                    setRecurring(e.target.checked);
+                    if (e.target.checked && recurrenceType === 'none') setRecurrenceType('daily');
+                  }}
+                  className="w-4 h-4 accent-primary"
+                />
+              </div>
+            </div>
+
+            {recurring && (
+              <div className="space-y-3 bg-muted/30 p-3 rounded-lg animate-in fade-in slide-in-from-top-2">
+                <div className="space-y-1.5">
+                  <Label className="text-xs">Frecuencia</Label>
+                  <Select value={recurrenceType} onValueChange={v => setRecurrenceType(v as any)}>
+                    <SelectTrigger className="bg-muted border-border h-8 text-xs"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="daily">Diariamente</SelectItem>
+                      <SelectItem value="weekly">Semanalmente</SelectItem>
+                      <SelectItem value="custom">Personalizado (cada X días)</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                {recurrenceType === 'weekly' && (
+                  <div className="space-y-1.5">
+                    <Label className="text-xs">Días de la semana</Label>
+                    <div className="flex justify-between gap-1">
+                      {[{ label: 'L', value: 1 }, { label: 'M', value: 2 }, { label: 'X', value: 3 }, { label: 'J', value: 4 }, { label: 'V', value: 5 }, { label: 'S', value: 6 }, { label: 'D', value: 0 }].map(({ label, value }) => (
+                        <button
+                          key={value}
+                          onClick={() => toggleDay(value)}
+                          className={`w-7 h-7 text-[10px] rounded-full flex items-center justify-center transition-colors ${recurrenceDays.includes(value)
+                            ? 'bg-primary text-primary-foreground font-bold'
+                            : 'bg-muted hover:bg-muted/80'
+                            }`}
+                        >
+                          {label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {recurrenceType === 'custom' && (
+                  <div className="space-y-1.5">
+                    <Label className="text-xs">Repetir cada (días)</Label>
+                    <Input
+                      type="number"
+                      min="2"
+                      value={recurrenceInterval}
+                      onChange={e => setRecurrenceInterval(parseInt(e.target.value) || 2)}
+                      className="bg-muted border-border h-8"
+                    />
+                  </div>
+                )}
+
+                <div className="space-y-1.5">
+                  <Label className="text-xs">Fecha fin (opcional)</Label>
+                  <Input
+                    type="date"
+                    value={recurrenceEnd}
+                    onChange={e => setRecurrenceEnd(e.target.value)}
+                    className="bg-muted border-border h-8"
+                  />
+                </div>
+              </div>
+            )}
+          </div>
+
           <Button onClick={handleSubmit} className="w-full gradient-training text-primary-foreground font-semibold rounded-xl">
             {editing ? 'Actualizar' : 'Guardar'}
           </Button>

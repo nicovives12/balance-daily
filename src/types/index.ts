@@ -22,8 +22,11 @@ export interface Workout {
   intensity: Intensity;
   caloriesBurned: number;
   notes?: string;
-  recurring?: boolean;
-  recurringDays?: number[]; // 0-6, Sun-Sat
+  recurring: boolean;
+  recurrenceType?: 'none' | 'daily' | 'weekly' | 'custom';
+  recurrenceInterval?: number; // for custom (every X days)
+  recurrenceDays?: number[]; // for weekly (0-6, Sun-Sat)
+  recurrenceEnd?: string; // YYYY-MM-DD
 }
 
 // Nutrition
