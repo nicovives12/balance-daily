@@ -133,20 +133,20 @@ export default function Profile() {
               <Target className="w-4 h-4" /> Objetivos Diarios
             </h2>
             <div className="grid grid-cols-2 gap-3">
-              <div className="bg-muted rounded-xl p-3 text-center">
-                <Flame className="w-5 h-5 text-primary mx-auto mb-1" />
+              <div className="bg-muted rounded-xl p-3 text-center flex flex-col items-center justify-center">
+                <Flame className="w-5 h-5 text-primary mb-1" />
                 <p className="stat-number text-primary">{targets.calories}</p>
                 <p className="text-[10px] text-muted-foreground">kcal</p>
               </div>
-              <div className="bg-muted rounded-xl p-3 text-center">
+              <div className="bg-muted rounded-xl p-3 text-center flex flex-col items-center justify-center">
                 <p className="stat-number text-secondary">{targets.protein}g</p>
                 <p className="text-[10px] text-muted-foreground">Proteínas</p>
               </div>
-              <div className="bg-muted rounded-xl p-3 text-center">
+              <div className="bg-muted rounded-xl p-3 text-center flex flex-col items-center justify-center">
                 <p className="stat-number text-accent">{targets.carbs}g</p>
                 <p className="text-[10px] text-muted-foreground">Carbohidratos</p>
               </div>
-              <div className="bg-muted rounded-xl p-3 text-center">
+              <div className="bg-muted rounded-xl p-3 text-center flex flex-col items-center justify-center">
                 <p className="stat-number text-profile">{targets.fat}g</p>
                 <p className="text-[10px] text-muted-foreground">Grasas</p>
               </div>
