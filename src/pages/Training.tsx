@@ -6,6 +6,7 @@ import { es } from 'date-fns/locale';
 import { Workout, ExerciseType, Intensity } from '@/types';
 import { getWorkouts, saveWorkout, deleteWorkout, getProfile, estimateCaloriesBurned, generateId } from '@/lib/storage';
 import { isWorkoutOnDate } from '@/lib/recurrence';
+import { useAuth } from '@/contexts/AuthContext';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -50,15 +51,23 @@ const intensityLabels: Record<Intensity, string> = {
 };
 
 export default function Training() {
+  const { user } = useAuth();
   const [workouts, setWorkouts] = useState<Workout[]>([]);
   const [weekStart, setWeekStart] = useState(() => startOfWeek(new Date(), { weekStartsOn: 1 }));
   const [selectedDate, setSelectedDate] = useState(new Date());
   const [showForm, setShowForm] = useState(false);
   const [editingWorkout, setEditingWorkout] = useState<Workout | null>(null);
+  const [profileWeight, setProfileWeight] = useState(70);
 
   useEffect(() => {
-    setWorkouts(getWorkouts());
-  }, []);
+    if (!user) return;
+    const load = async () => {
+      const [w, p] = await Promise.all([getWorkouts(user.id), getProfile(user.id)]);
+      setWorkouts(w);
+      if (p) setProfileWeight(p.weight);
+    };
+    load();
+  }, [user]);
 
   const weekDays = useMemo(() =>
     Array.from({ length: 7 }, (_, i) => addDays(weekStart, i)),
@@ -69,17 +78,19 @@ export default function Training() {
 
   const dayWorkouts = workouts.filter(w => isWorkoutOnDate(w, selectedDate));
 
-  const handleSave = (workout: Workout) => {
-    saveWorkout(workout);
-    setWorkouts(getWorkouts());
+  const handleSave = async (workout: Workout) => {
+    if (!user) return;
+    await saveWorkout(user.id, workout);
+    setWorkouts(await getWorkouts(user.id));
     setShowForm(false);
     setEditingWorkout(null);
     toast.success(editingWorkout ? 'Entrenamiento actualizado' : 'Entrenamiento añadido');
   };
 
-  const handleDelete = (id: string) => {
-    deleteWorkout(id);
-    setWorkouts(getWorkouts());
+  const handleDelete = async (id: string) => {
+    if (!user) return;
+    await deleteWorkout(id);
+    setWorkouts(await getWorkouts(user.id));
     toast.success('Entrenamiento eliminado');
   };
 
@@ -198,19 +209,21 @@ export default function Training() {
         onSave={handleSave}
         date={selectedDateStr}
         editing={editingWorkout}
+        weight={profileWeight}
       />
     </div>
   );
 }
 
 function WorkoutFormDialog({
-  open, onClose, onSave, date, editing,
+  open, onClose, onSave, date, editing, weight,
 }: {
   open: boolean;
   onClose: () => void;
   onSave: (w: Workout) => void;
   date: string;
   editing: Workout | null;
+  weight: number;
 }) {
   const [exerciseType, setExerciseType] = useState<ExerciseType>('gym');
   const [duration, setDuration] = useState(60);
@@ -267,8 +280,6 @@ function WorkoutFormDialog({
     );
   };
 
-  const profile = getProfile();
-  const weight = profile?.weight || 70;
   const estimated = estimateCaloriesBurned(exerciseType, duration, intensity, weight);
   const calories = manualCalories ?? estimated;
 

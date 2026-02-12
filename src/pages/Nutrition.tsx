@@ -10,6 +10,7 @@ import { es } from 'date-fns/locale';
 import { Meal, MealType, FoodItem } from '@/types';
 import { getMeals, saveMeal, deleteMeal, generateId, getProfile, calculateDailyTargets } from '@/lib/storage';
 import { analyzeTextWithGemini, analyzeImageWithGemini, fileToBase64 } from '@/lib/gemini';
+import { useAuth } from '@/contexts/AuthContext';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -27,20 +28,25 @@ const mealTypeConfig: Record<MealType, { label: string; icon: any; color: string
 };
 
 export default function Nutrition() {
+  const { user } = useAuth();
   const [meals, setMeals] = useState<Meal[]>([]);
   const [selectedDate, setSelectedDate] = useState(new Date());
   const [showForm, setShowForm] = useState(false);
   const [editingMeal, setEditingMeal] = useState<Meal | null>(null);
+  const [targets, setTargets] = useState({ calories: 2000, protein: 150, carbs: 225, fat: 67 });
 
   useEffect(() => {
-    setMeals(getMeals());
-  }, []);
+    if (!user) return;
+    const load = async () => {
+      const [m, p] = await Promise.all([getMeals(user.id), getProfile(user.id)]);
+      setMeals(m);
+      if (p) setTargets(calculateDailyTargets(p));
+    };
+    load();
+  }, [user]);
 
   const dateStr = format(selectedDate, 'yyyy-MM-dd');
   const dayMeals = meals.filter(m => m.date === dateStr);
-
-  const profile = getProfile();
-  const targets = profile ? calculateDailyTargets(profile) : { calories: 2000, protein: 150, carbs: 225, fat: 67 };
 
   const totals = dayMeals.reduce(
     (acc, m) => ({
@@ -52,17 +58,19 @@ export default function Nutrition() {
     { calories: 0, protein: 0, carbs: 0, fat: 0 }
   );
 
-  const handleSave = (meal: Meal) => {
-    saveMeal(meal);
-    setMeals(getMeals());
+  const handleSave = async (meal: Meal) => {
+    if (!user) return;
+    await saveMeal(user.id, meal);
+    setMeals(await getMeals(user.id));
     setShowForm(false);
     setEditingMeal(null);
     toast.success(editingMeal ? 'Comida actualizada' : 'Comida registrada');
   };
 
-  const handleDelete = (id: string) => {
-    deleteMeal(id);
-    setMeals(getMeals());
+  const handleDelete = async (id: string) => {
+    if (!user) return;
+    await deleteMeal(id);
+    setMeals(await getMeals(user.id));
     toast.success('Comida eliminada');
   };
 

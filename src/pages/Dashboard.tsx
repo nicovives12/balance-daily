@@ -1,4 +1,5 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
+import { useAuth } from '@/contexts/AuthContext';
 import { motion } from 'framer-motion';
 import {
   LayoutDashboard, Flame, TrendingUp, TrendingDown, Minus,
@@ -84,15 +85,29 @@ const COLORS = {
 const PIE_COLORS = ['#6366f1', '#10b981', '#f59e0b'];
 
 export default function Dashboard() {
+  const { user } = useAuth();
   const [selectedDate, setSelectedDate] = useState(new Date());
   const [monthDate, setMonthDate] = useState(new Date());
   const [activeSection, setActiveSection] = useState<'today' | 'stats'>('today');
   const [statsPeriod, setStatsPeriod] = useState<StatsPeriod>('week');
+  const [workouts, setWorkouts] = useState<Workout[]>([]);
+  const [meals, setMeals] = useState<Meal[]>([]);
+  const [targets, setTargets] = useState({ calories: 2000, protein: 150, carbs: 225, fat: 67 });
 
-  const workouts = getWorkouts();
-  const meals = getMeals();
-  const profile = getProfile();
-  const targets = profile ? calculateDailyTargets(profile) : { calories: 2000, protein: 150, carbs: 225, fat: 67 };
+  useEffect(() => {
+    if (!user) return;
+    const load = async () => {
+      const [w, m, p] = await Promise.all([
+        getWorkouts(user.id),
+        getMeals(user.id),
+        getProfile(user.id),
+      ]);
+      setWorkouts(w);
+      setMeals(m);
+      if (p) setTargets(calculateDailyTargets(p));
+    };
+    load();
+  }, [user]);
 
   // ─── Today data ───
   const dateStr = format(selectedDate, 'yyyy-MM-dd');
@@ -201,8 +216,8 @@ export default function Dashboard() {
           <button
             onClick={() => setActiveSection('today')}
             className={`flex-1 py-2 px-3 rounded-lg text-sm font-semibold transition-all flex items-center justify-center gap-2 ${activeSection === 'today'
-                ? 'gradient-dashboard text-primary-foreground shadow-sm'
-                : 'text-muted-foreground hover:text-foreground'
+              ? 'gradient-dashboard text-primary-foreground shadow-sm'
+              : 'text-muted-foreground hover:text-foreground'
               }`}
           >
             <CalendarIcon className="w-4 h-4" /> Hoy
@@ -210,8 +225,8 @@ export default function Dashboard() {
           <button
             onClick={() => setActiveSection('stats')}
             className={`flex-1 py-2 px-3 rounded-lg text-sm font-semibold transition-all flex items-center justify-center gap-2 ${activeSection === 'stats'
-                ? 'gradient-dashboard text-primary-foreground shadow-sm'
-                : 'text-muted-foreground hover:text-foreground'
+              ? 'gradient-dashboard text-primary-foreground shadow-sm'
+              : 'text-muted-foreground hover:text-foreground'
               }`}
           >
             <BarChart3 className="w-4 h-4" /> Estadísticas
@@ -357,8 +372,8 @@ export default function Dashboard() {
                   key={p.value}
                   onClick={() => setStatsPeriod(p.value)}
                   className={`flex-1 py-1.5 rounded-lg text-xs font-semibold transition-all ${statsPeriod === p.value
-                      ? 'bg-primary text-primary-foreground'
-                      : 'text-muted-foreground hover:text-foreground'
+                    ? 'bg-primary text-primary-foreground'
+                    : 'text-muted-foreground hover:text-foreground'
                     }`}
                 >
                   {p.label}

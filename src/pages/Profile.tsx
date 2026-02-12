@@ -1,8 +1,9 @@
 import { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
-import { User, Target, Flame, Save } from 'lucide-react';
+import { User, Target, Flame, Save, LogOut } from 'lucide-react';
 import { UserProfile } from '@/types';
 import { getProfile, saveProfile, calculateDailyTargets } from '@/lib/storage';
+import { useAuth } from '@/contexts/AuthContext';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -20,17 +21,21 @@ const defaultProfile: UserProfile = {
 };
 
 export default function Profile() {
+  const { user, signOut } = useAuth();
   const [profile, setProfile] = useState<UserProfile>(defaultProfile);
 
   useEffect(() => {
-    const saved = getProfile();
-    if (saved) setProfile(saved);
-  }, []);
+    if (!user) return;
+    getProfile(user.id).then(saved => {
+      if (saved) setProfile(saved);
+    });
+  }, [user]);
 
   const targets = calculateDailyTargets(profile);
 
-  const handleSave = () => {
-    saveProfile({ ...profile, onboardingComplete: true });
+  const handleSave = async () => {
+    if (!user) return;
+    await saveProfile(user.id, { ...profile, onboardingComplete: true });
     toast.success('Perfil guardado correctamente');
   };
 
@@ -48,7 +53,7 @@ export default function Profile() {
           </div>
           <div>
             <h1 className="text-xl font-bold">Mi Perfil</h1>
-            <p className="text-sm text-muted-foreground">Configura tus datos personales</p>
+            <p className="text-sm text-muted-foreground">{user?.email}</p>
           </div>
         </div>
 
@@ -155,6 +160,14 @@ export default function Profile() {
 
           <Button onClick={handleSave} className="w-full gradient-training text-primary-foreground font-semibold h-12 rounded-xl">
             <Save className="w-4 h-4 mr-2" /> Guardar Perfil
+          </Button>
+
+          <Button
+            onClick={signOut}
+            variant="outline"
+            className="w-full h-12 rounded-xl border-destructive text-destructive hover:bg-destructive hover:text-destructive-foreground font-semibold"
+          >
+            <LogOut className="w-4 h-4 mr-2" /> Cerrar Sesión
           </Button>
         </div>
       </motion.div>
