@@ -21,6 +21,14 @@ serve(async (req) => {
       );
     }
 
+    // Input length validation to limit abuse
+    if (description.length > 500) {
+      return new Response(
+        JSON.stringify({ error: "La descripción es demasiado larga (máximo 500 caracteres)" }),
+        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
     const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
     if (!LOVABLE_API_KEY) {
       throw new Error("LOVABLE_API_KEY is not configured");
