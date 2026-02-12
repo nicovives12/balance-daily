@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Plus, UtensilsCrossed, Coffee, Sun, Moon, Cookie, ChevronLeft, ChevronRight, Trash2, Edit2, Flame } from 'lucide-react';
+import { Plus, UtensilsCrossed, Coffee, Sun, Moon, Cookie, ChevronLeft, ChevronRight, Trash2, Edit2, Flame, Sparkles, Loader2 } from 'lucide-react';
 import { format, addDays, isSameDay } from 'date-fns';
 import { es } from 'date-fns/locale';
 import { Meal, MealType, FoodItem } from '@/types';
@@ -10,6 +10,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Textarea } from '@/components/ui/textarea';
 import { Progress } from '@/components/ui/progress';
 import { toast } from 'sonner';
 
@@ -205,6 +206,8 @@ function MealFormDialog({
   const [mealType, setMealType] = useState<MealType>('lunch');
   const [time, setTime] = useState('12:00');
   const [foods, setFoods] = useState<FoodItem[]>([{ name: '', calories: 0, protein: 0, carbs: 0, fat: 0 }]);
+  const [aiDescription, setAiDescription] = useState('');
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
 
   useEffect(() => {
     if (editing) {
@@ -216,6 +219,7 @@ function MealFormDialog({
       setTime('12:00');
       setFoods([{ name: '', calories: 0, protein: 0, carbs: 0, fat: 0 }]);
     }
+    setAiDescription('');
   }, [editing, open]);
 
   const updateFood = (index: number, field: keyof FoodItem, value: any) => {
@@ -224,6 +228,50 @@ function MealFormDialog({
 
   const addFood = () => setFoods(prev => [...prev, { name: '', calories: 0, protein: 0, carbs: 0, fat: 0 }]);
   const removeFood = (index: number) => setFoods(prev => prev.filter((_, i) => i !== index));
+
+  const analyzeWithAI = async () => {
+    if (!aiDescription.trim()) {
+      toast.error('Escribe qué has comido');
+      return;
+    }
+    setIsAnalyzing(true);
+    try {
+      const resp = await fetch(
+        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/analyze-food`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
+          },
+          body: JSON.stringify({ description: aiDescription }),
+        }
+      );
+
+      if (!resp.ok) {
+        const err = await resp.json().catch(() => ({}));
+        throw new Error(err.error || 'Error al analizar');
+      }
+
+      const data = await resp.json();
+      if (data.foods && Array.isArray(data.foods) && data.foods.length > 0) {
+        setFoods(data.foods.map((f: any) => ({
+          name: f.name || '',
+          calories: Math.round(f.calories || 0),
+          protein: Math.round(f.protein || 0),
+          carbs: Math.round(f.carbs || 0),
+          fat: Math.round(f.fat || 0),
+        })));
+        toast.success('¡Alimentos analizados! Puedes editar los valores.');
+      } else {
+        throw new Error('No se pudieron detectar alimentos');
+      }
+    } catch (e: any) {
+      toast.error(e.message || 'Error al analizar la comida');
+    } finally {
+      setIsAnalyzing(false);
+    }
+  };
 
   const handleSubmit = () => {
     const validFoods = foods.filter(f => f.name.trim());
@@ -279,8 +327,34 @@ function MealFormDialog({
             </div>
           </div>
 
+          {/* AI Analysis Section */}
+          <div className="space-y-2 p-3 rounded-xl bg-muted/50 border border-border">
+            <div className="flex items-center gap-2">
+              <Sparkles className="w-4 h-4 text-secondary" />
+              <Label className="text-xs font-semibold">Describe lo que has comido</Label>
+            </div>
+            <Textarea
+              value={aiDescription}
+              onChange={e => setAiDescription(e.target.value)}
+              placeholder="Ej: Dos huevos revueltos con tostadas, un café con leche y una naranja"
+              className="bg-card border-border text-sm min-h-[60px] resize-none"
+            />
+            <Button
+              onClick={analyzeWithAI}
+              disabled={isAnalyzing || !aiDescription.trim()}
+              variant="outline"
+              className="w-full text-sm border-secondary text-secondary hover:bg-secondary hover:text-secondary-foreground"
+            >
+              {isAnalyzing ? (
+                <><Loader2 className="w-4 h-4 mr-1.5 animate-spin" /> Analizando...</>
+              ) : (
+                <><Sparkles className="w-4 h-4 mr-1.5" /> Estimar con IA</>
+              )}
+            </Button>
+          </div>
+
           <div className="space-y-2">
-            <Label className="text-xs">Alimentos</Label>
+            <Label className="text-xs">Alimentos {foods.some(f => f.name) && <span className="text-muted-foreground">(puedes editar los valores)</span>}</Label>
             {foods.map((food, i) => (
               <div key={i} className="bg-muted rounded-xl p-3 space-y-2">
                 <div className="flex items-center justify-between">
@@ -288,10 +362,10 @@ function MealFormDialog({
                     value={food.name}
                     onChange={e => updateFood(i, 'name', e.target.value)}
                     placeholder="Nombre del alimento"
-                    className="bg-background border-border text-sm flex-1"
+                    className="bg-card border-border text-sm flex-1"
                   />
                   {foods.length > 1 && (
-                    <button onClick={() => removeFood(i)} className="ml-2 p-1 hover:bg-background rounded">
+                    <button onClick={() => removeFood(i)} className="ml-2 p-1 hover:bg-card rounded">
                       <Trash2 className="w-3.5 h-3.5 text-destructive" />
                     </button>
                   )}
@@ -309,7 +383,7 @@ function MealFormDialog({
                         type="number"
                         value={food[key]}
                         onChange={e => updateFood(i, key, parseFloat(e.target.value) || 0)}
-                        className="bg-background border-border text-xs h-8"
+                        className="bg-card border-border text-xs h-8"
                       />
                     </div>
                   ))}
