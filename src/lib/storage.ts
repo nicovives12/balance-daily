@@ -16,6 +16,7 @@ export async function getProfile(userId: string): Promise<UserProfile | null> {
   }
 
   return {
+    name: data.name ?? '',
     age: data.age ?? 25,
     weight: data.weight ?? 70,
     height: data.height ?? 170,
@@ -29,6 +30,7 @@ export async function getProfile(userId: string): Promise<UserProfile | null> {
 export async function saveProfile(userId: string, profile: UserProfile): Promise<void> {
   const { error } = await supabase.from('profiles').upsert({
     id: userId,
+    name: profile.name,
     age: profile.age,
     weight: profile.weight,
     height: profile.height,

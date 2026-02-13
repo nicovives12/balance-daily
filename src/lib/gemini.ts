@@ -53,13 +53,32 @@ export interface GeminiAnalysisResult {
 }
 
 function parseGeminiResponse(text: string): GeminiAnalysisResult {
-    // Remove markdown code fences if present
     let cleaned = text.trim();
-    if (cleaned.startsWith('```')) {
-        cleaned = cleaned.replace(/^```(?:json)?\n?/, '').replace(/\n?```$/, '');
+
+    // Remove markdown code fences if present
+    cleaned = cleaned.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '');
+
+    // Extract JSON object: find the first '{' and the matching last '}'
+    const firstBrace = cleaned.indexOf('{');
+    const lastBrace = cleaned.lastIndexOf('}');
+    if (firstBrace !== -1 && lastBrace > firstBrace) {
+        cleaned = cleaned.substring(firstBrace, lastBrace + 1);
     }
 
-    const data = JSON.parse(cleaned);
+    // Remove trailing commas before closing braces/brackets (common LLM mistake)
+    cleaned = cleaned.replace(/,\s*([}\]])/g, '$1');
+
+    // Remove control characters that break JSON (except normal whitespace)
+    cleaned = cleaned.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F]/g, '');
+
+    let data: any;
+    try {
+        data = JSON.parse(cleaned);
+    } catch (e) {
+        console.error('Gemini JSON parse error. Raw text:', text);
+        console.error('Cleaned text:', cleaned);
+        throw new Error('La respuesta de IA no pudo interpretarse. Inténtalo de nuevo o escribe la descripción de otra forma.');
+    }
 
     if (!data.foods || !Array.isArray(data.foods) || data.foods.length === 0) {
         throw new Error('No se pudieron detectar alimentos');
@@ -68,11 +87,11 @@ function parseGeminiResponse(text: string): GeminiAnalysisResult {
     return {
         mealType: data.mealType as MealType | undefined,
         foods: data.foods.map((f: any) => ({
-            name: f.name || 'Alimento',
-            calories: Math.round(f.calories || 0),
-            protein: Math.round(f.protein || 0),
-            carbs: Math.round(f.carbs || 0),
-            fat: Math.round(f.fat || 0),
+            name: String(f.name || 'Alimento'),
+            calories: Math.round(Number(f.calories) || 0),
+            protein: Math.round(Number(f.protein) || 0),
+            carbs: Math.round(Number(f.carbs) || 0),
+            fat: Math.round(Number(f.fat) || 0),
         })),
     };
 }
@@ -95,6 +114,7 @@ export async function analyzeTextWithGemini(description: string): Promise<Gemini
             generationConfig: {
                 temperature: 0.3,
                 maxOutputTokens: 1024,
+                responseMimeType: 'application/json',
             }
         }),
     });
@@ -140,6 +160,7 @@ export async function analyzeImageWithGemini(
             generationConfig: {
                 temperature: 0.3,
                 maxOutputTokens: 1024,
+                responseMimeType: 'application/json',
             }
         }),
     });

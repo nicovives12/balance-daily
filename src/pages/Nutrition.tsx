@@ -429,7 +429,20 @@ function MealFormDialog({
             </div>
             <div className="space-y-1.5">
               <Label className="text-xs">Hora</Label>
-              <Input type="time" value={time} onChange={e => setTime(e.target.value)} className="bg-muted border-border" />
+              <Input
+                type="text"
+                inputMode="numeric"
+                placeholder="HH:MM"
+                value={time}
+                onChange={e => {
+                  let v = e.target.value.replace(/[^\d]/g, '');
+                  if (v.length >= 3) v = v.slice(0, 2) + ':' + v.slice(2, 4);
+                  if (v.length > 5) v = v.slice(0, 5);
+                  setTime(v);
+                }}
+                maxLength={5}
+                className="bg-muted border-border h-9 text-sm px-2 text-center"
+              />
             </div>
           </div>
 

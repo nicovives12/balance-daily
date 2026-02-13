@@ -251,6 +251,7 @@ function WorkoutFormDialog({
       setRecurrenceInterval(1);
       setRecurrenceDays([]);
       setRecurrenceEnd('');
+      setRecurrenceEndDisplay('');
     }
   }, [editing, open]);
 
@@ -260,6 +261,7 @@ function WorkoutFormDialog({
   const [recurrenceInterval, setRecurrenceInterval] = useState(1);
   const [recurrenceDays, setRecurrenceDays] = useState<number[]>([]);
   const [recurrenceEnd, setRecurrenceEnd] = useState('');
+  const [recurrenceEndDisplay, setRecurrenceEndDisplay] = useState('');
 
   // Handle loading editing state for recurrence
   useEffect(() => {
@@ -269,6 +271,8 @@ function WorkoutFormDialog({
       setRecurrenceInterval(editing.recurrenceInterval || 1);
       setRecurrenceDays(editing.recurrenceDays || []);
       setRecurrenceEnd(editing.recurrenceEnd || '');
+      const re = editing.recurrenceEnd || '';
+      setRecurrenceEndDisplay(re ? re.split('-').reverse().join('/') : '');
     }
   }, [editing]);
 
@@ -303,7 +307,7 @@ function WorkoutFormDialog({
 
   return (
     <Dialog open={open} onOpenChange={v => !v && onClose()}>
-      <DialogContent className="bg-card border-border max-w-sm mx-auto">
+      <DialogContent className="bg-card border-border max-w-sm mx-auto max-h-[85vh] overflow-y-auto p-6">
         <DialogHeader>
           <DialogTitle>{editing ? 'Editar' : 'Nuevo'} Entrenamiento</DialogTitle>
         </DialogHeader>
@@ -322,11 +326,24 @@ function WorkoutFormDialog({
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1.5">
               <Label className="text-xs">Hora</Label>
-              <Input type="time" value={time} onChange={e => setTime(e.target.value)} className="bg-muted border-border" />
+              <Input
+                type="text"
+                inputMode="numeric"
+                placeholder="HH:MM"
+                value={time}
+                onChange={e => {
+                  let v = e.target.value.replace(/[^\d]/g, '');
+                  if (v.length >= 3) v = v.slice(0, 2) + ':' + v.slice(2, 4);
+                  if (v.length > 5) v = v.slice(0, 5);
+                  setTime(v);
+                }}
+                maxLength={5}
+                className="bg-muted border-border h-9 text-sm px-2 text-center"
+              />
             </div>
             <div className="space-y-1.5">
               <Label className="text-xs">Duración (min)</Label>
-              <Input type="number" value={duration} onChange={e => setDuration(parseInt(e.target.value) || 0)} className="bg-muted border-border" />
+              <Input type="number" value={duration} onChange={e => setDuration(parseInt(e.target.value) || 0)} className="bg-muted border-border h-9 text-sm px-2 text-center" />
             </div>
           </div>
           <div className="space-y-1.5">
@@ -420,10 +437,26 @@ function WorkoutFormDialog({
                 <div className="space-y-1.5">
                   <Label className="text-xs">Fecha fin (opcional)</Label>
                   <Input
-                    type="date"
-                    value={recurrenceEnd}
-                    onChange={e => setRecurrenceEnd(e.target.value)}
-                    className="bg-muted border-border h-8"
+                    type="text"
+                    inputMode="numeric"
+                    placeholder="DD/MM/AAAA"
+                    value={recurrenceEndDisplay}
+                    onChange={e => {
+                      let v = e.target.value.replace(/[^\d]/g, '');
+                      if (v.length >= 3) v = v.slice(0, 2) + '/' + v.slice(2);
+                      if (v.length >= 6) v = v.slice(0, 5) + '/' + v.slice(5, 9);
+                      if (v.length > 10) v = v.slice(0, 10);
+                      setRecurrenceEndDisplay(v);
+                      // Convert DD/MM/YYYY to YYYY-MM-DD for storage when complete
+                      const parts = v.split('/');
+                      if (parts.length === 3 && parts[2]?.length === 4) {
+                        setRecurrenceEnd(`${parts[2]}-${parts[1]}-${parts[0]}`);
+                      } else {
+                        setRecurrenceEnd('');
+                      }
+                    }}
+                    maxLength={10}
+                    className="bg-muted border-border h-9 text-xs px-2 text-center"
                   />
                 </div>
               </div>
